@@ -50,7 +50,7 @@ export default function LoginPage() {
           <div>
             <label
               htmlFor="username"
-              className="mb-2 block text-sm font-medium text-gray-700"
+              className="mb-2 block text-sm font-medium text-gray-900"
             >
               Username
             </label>
@@ -62,14 +62,14 @@ export default function LoginPage() {
               onChange={(event) => setUsername(event.target.value)}
               placeholder="Enter username"
               required
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-blue-500"
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 placeholder:text-gray-500 outline-none focus:border-blue-500"
             />
           </div>
 
           <div>
             <label
               htmlFor="password"
-              className="mb-2 block text-sm font-medium text-gray-700"
+              className="mb-2 block text-sm font-medium text-gray-900"
             >
               Password
             </label>
@@ -81,7 +81,7 @@ export default function LoginPage() {
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Enter password"
               required
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none focus:border-blue-500"
+              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 placeholder:text-gray-500 outline-none focus:border-blue-500"
             />
           </div>
 

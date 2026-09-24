@@ -9,6 +9,7 @@ interface AuthGuardProps {
 
 export default function AuthGuard({ children }: AuthGuardProps) {
   const router = useRouter();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
@@ -19,15 +20,20 @@ export default function AuthGuard({ children }: AuthGuardProps) {
       return;
     }
 
+    setIsAuthenticated(true);
     setIsChecking(false);
   }, [router]);
 
   if (isChecking) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
-        <p className="text-gray-600">Checking authentication...</p>
+      <main className="flex min-h-screen items-center justify-center bg-gray-100">
+        <p className="text-gray-700">Checking authentication...</p>
       </main>
     );
+  }
+
+  if (!isAuthenticated) {
+    return null;
   }
 
   return <>{children}</>;

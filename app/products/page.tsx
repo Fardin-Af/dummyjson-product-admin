@@ -4,8 +4,17 @@ import {
   ChangeEvent,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
+
+import {
+  usePathname,
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
+
+import Link from "next/link";
 
 import AuthGuard from "@/components/AuthGuard";
 
@@ -28,26 +37,160 @@ type SortOption =
   | "title-desc";
 
 export default function ProductsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  /*
+   * Read URL parameters directly from the browser on the first render.
+   * This makes direct URLs such as:
+   *
+   * /products?page=999
+   *
+   * initialize with page 999 instead of accidentally starting at page 1.
+   */
+  const getInitialParam = (key: string) => {
+    if (typeof window !== "undefined") {
+      return new URLSearchParams(window.location.search).get(key);
+    }
+
+    return searchParams.get(key);
+  };
+
   const [products, setProducts] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
-
   const [categories, setCategories] = useState<Category[]>([]);
-  const [category, setCategory] = useState("");
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // Page
+  const [page, setPage] = useState(() => {
+    const value = Number(getInitialParam("page"));
 
-  const [search, setSearch] = useState("");
-  const [searchInput, setSearchInput] = useState("");
+    return Number.isInteger(value) && value > 0 ? value : 1;
+  });
 
-  const [sort, setSort] = useState<SortOption>("");
+  // Page size
+  const [pageSize, setPageSize] = useState(() => {
+    const value = Number(getInitialParam("pageSize"));
+
+    return [10, 20, 50].includes(value) ? value : 10;
+  });
+
+  // Search
+  const [search, setSearch] = useState(
+    () => getInitialParam("search") || ""
+  );
+
+  const [searchInput, setSearchInput] = useState(
+    () => getInitialParam("search") || ""
+  );
+
+  const isInitialSearchRender = useRef(true);
+
+  // Category
+  const [category, setCategory] = useState(
+    () => getInitialParam("category") || ""
+  );
+
+  // Sort
+  const [sort, setSort] = useState<SortOption>(() => {
+    const value = getInitialParam("sort");
+
+    const validSorts: SortOption[] = [
+      "",
+      "price-asc",
+      "price-desc",
+      "rating-asc",
+      "rating-desc",
+      "title-asc",
+      "title-desc",
+    ];
+
+    return validSorts.includes(value as SortOption)
+      ? (value as SortOption)
+      : "";
+  });
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Calculate total number of pages
   const totalPages = Math.ceil(total / pageSize);
 
-  // Convert our UI sort value into API parameters
+  /*
+   * Safety check:
+   * If the current page becomes larger than the available pages,
+   * move the user to the last valid page.
+   */
+  useEffect(() => {
+    if (totalPages > 0 && page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [totalPages, page]);
+
+  /*
+   * Keep page, page size, search, category and sort values
+   * synchronized with the URL.
+   */
+  const updateUrl = useCallback(() => {
+    const params = new URLSearchParams();
+
+    if (page > 1) {
+      params.set("page", page.toString());
+    }
+
+    if (pageSize !== 10) {
+      params.set("pageSize", pageSize.toString());
+    }
+
+    if (search) {
+      params.set("search", search);
+    }
+
+    /*
+     * Search and category cannot be used together.
+     * Search has priority.
+     */
+    if (category && !search) {
+      params.set("category", category);
+    }
+
+    if (sort) {
+      params.set("sort", sort);
+    }
+
+    const queryString = params.toString();
+
+    router.replace(
+      queryString ? `${pathname}?${queryString}` : pathname,
+      { scroll: false }
+    );
+  }, [
+    page,
+    pageSize,
+    search,
+    category,
+    sort,
+    router,
+    pathname,
+  ]);
+
+  /*
+   * IMPORTANT:
+   * The dependency array always contains exactly the same
+   * number of dependencies.
+   *
+   * This fixes the React error:
+   * "The final argument passed to useEffect changed size between renders."
+   */
+  useEffect(() => {
+    if (totalPages === 0) {
+      return;
+    }
+
+    updateUrl();
+  }, [updateUrl, totalPages]);
+
+  // Convert UI sort value into API parameters
   const getSortParams = () => {
     if (!sort) {
       return {};
@@ -69,6 +212,7 @@ export default function ProductsPage() {
     const fetchCategories = async () => {
       try {
         const data = await getCategories();
+
         setCategories(data);
       } catch (error) {
         console.error("Failed to load categories:", error);
@@ -90,8 +234,13 @@ export default function ProductsPage() {
 
         let data;
 
-        // Search has priority.
-        // Category is intentionally not sent together with search.
+        /*
+         * Search has priority.
+         *
+         * The assignment states that search and category
+         * cannot be sent together to the API, so when searching
+         * we do not send the category.
+         */
         if (search.trim()) {
           data = await searchProducts(
             search.trim(),
@@ -116,14 +265,46 @@ export default function ProductsPage() {
           });
         }
 
-        setProducts(data.products);
+        /*
+         * Always store the total returned by the API.
+         */
         setTotal(data.total);
+
+        /*
+         * Handle invalid page values.
+         *
+         * Example:
+         *
+         * /products?page=999
+         *
+         * If there are 194 products and page size is 10:
+         *
+         * total pages = 20
+         *
+         * So page 999 becomes page 20.
+         */
+        const maxPage = Math.max(
+          1,
+          Math.ceil(data.total / pageSize)
+        );
+
+        if (page > maxPage) {
+          setPage(maxPage);
+          return;
+        }
+
+        setProducts(data.products);
       } catch (error) {
+        /*
+         * Ignore errors caused by intentionally cancelled
+         * requests.
+         */
         if (signal?.aborted) {
           return;
         }
 
         console.error(error);
+
         setError("Failed to load products.");
       } finally {
         if (!signal?.aborted) {
@@ -134,7 +315,10 @@ export default function ProductsPage() {
     [page, pageSize, search, category, sort]
   );
 
-  // Fetch products whenever filters change
+  /*
+   * Fetch products whenever page, page size, search,
+   * category or sort changes.
+   */
   useEffect(() => {
     const controller = new AbortController();
 
@@ -145,8 +329,18 @@ export default function ProductsPage() {
     };
   }, [fetchProducts]);
 
-  // Debounce search
+  /*
+   * Debounce search.
+   *
+   * The API is not called on every keystroke.
+   * It waits 500ms after the user stops typing.
+   */
   useEffect(() => {
+    if (isInitialSearchRender.current) {
+      isInitialSearchRender.current = false;
+      return;
+    }
+
     const timer = setTimeout(() => {
       setSearch(searchInput.trim());
       setPage(1);
@@ -165,7 +359,10 @@ export default function ProductsPage() {
 
     setSearchInput(value);
 
-    // Search and category cannot be used together.
+    /*
+     * Search and category cannot be used together.
+     * When the user starts searching, clear the category.
+     */
     if (value.trim()) {
       setCategory("");
     }
@@ -244,7 +441,7 @@ export default function ProductsPage() {
                   value={searchInput}
                   onChange={handleSearchChange}
                   placeholder="Search by product name..."
-                 className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 placeholder:text-gray-500 outline-none focus:border-blue-500"
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 placeholder:text-gray-500 outline-none focus:border-blue-500"
                 />
               </div>
 
@@ -329,6 +526,7 @@ export default function ProductsPage() {
                   </option>
                 </select>
               </div>
+
             </div>
           </div>
 
@@ -414,9 +612,12 @@ export default function ProductsPage() {
                                   className="h-14 w-14 rounded-lg object-cover"
                                 />
 
-                                <span className="font-medium text-gray-900">
-                                  {product.title}
-                                </span>
+                                <Link
+  href={`/products/${product.id}`}
+  className="font-medium text-gray-900 hover:text-blue-600"
+>
+  {product.title}
+</Link>
                               </div>
                             </td>
 
@@ -479,9 +680,17 @@ export default function ProductsPage() {
                       onChange={handlePageSizeChange}
                       className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
                     >
-                      <option value={10}>10</option>
-                      <option value={20}>20</option>
-                      <option value={50}>50</option>
+                      <option value={10}>
+                        10
+                      </option>
+
+                      <option value={20}>
+                        20
+                      </option>
+
+                      <option value={50}>
+                        50
+                      </option>
                     </select>
                   </div>
 
@@ -524,9 +733,11 @@ export default function ProductsPage() {
                       Next
                     </button>
                   </div>
+
                 </div>
               </>
             )}
+
         </div>
       </main>
     </AuthGuard>
